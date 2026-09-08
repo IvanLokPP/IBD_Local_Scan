@@ -42,6 +42,7 @@ def ranking_row(country, app_name, platform, rank):
         "Date": "2026-08-03",
         "Ranking": str(rank),
         "App ID": f"app-{country.lower()}-{platform.lower()}",
+        "App URL": f"https://apps.example/{country.lower()}/{platform.lower()}",
         "App name": app_name,
         "Company": "Test Publisher",
     }
@@ -60,7 +61,7 @@ def test_sea6_layer_combines_country_rows_and_accepts_lagged_ranking_date():
             write_csv(meeting / f"Unified Top Apps Revenue ({period}, {country}), Detailed.csv", rows, revenue_fields)
             for platform, suffix in (("Android", "Game"), ("iPhone", "Games")):
                 name = f"Sensor_Tower_Category_Rankings_{platform}_{country}_{suffix}_2026-08-03.csv"
-                write_csv(meeting / name, [ranking_row(country, "Shared SEA RPG", platform, 10)], mobile.TOP_CHART_REQUIRED_COLUMNS, delimiter="\t")
+                write_csv(meeting / name, [ranking_row(country, "Shared SEA RPG", platform, 10)], [*mobile.TOP_CHART_REQUIRED_COLUMNS, "App URL"], delimiter="\t")
 
         ranking_files = layer.discover_ranking_files("2026-08-04", root / "meeting_drop")
         assert len(ranking_files) == 12
@@ -84,6 +85,8 @@ def test_sea6_layer_combines_country_rows_and_accepts_lagged_ranking_date():
         assert shared["sg_revenue_gross"] == "71.43"
         assert shared["my_ios_rank"] == "10"
         assert shared["my_android_rank"] == "10"
+        assert shared["mobile_storefront_url"] == "https://apps.example/sg/iphone"
+        assert shared["mobile_storefront_url_source"] == "ranking_export"
         assert shared["ranking_data_as_of"] == "2026-08-03"
         assert shared["meeting_date"] == "2026-08-04"
 
@@ -97,7 +100,7 @@ def test_sg_logic_remains_the_anchor_for_report_period():
         for country in layer.SEA6_COUNTRIES:
             write_csv(meeting / f"Unified Top Apps Revenue ({period}, {country}), Detailed.csv", [row], mobile.REQUIRED_COLUMNS)
             for platform, suffix in (("Android", "Game"), ("iPhone", "Games")):
-                write_csv(meeting / f"Sensor_Tower_Category_Rankings_{platform}_{country}_{suffix}_2026-07-06.csv", [ranking_row(country, "SG Anchor Game", platform, 1)], mobile.TOP_CHART_REQUIRED_COLUMNS, delimiter="\t")
+                write_csv(meeting / f"Sensor_Tower_Category_Rankings_{platform}_{country}_{suffix}_2026-07-06.csv", [ranking_row(country, "SG Anchor Game", platform, 1)], [*mobile.TOP_CHART_REQUIRED_COLUMNS, "App URL"], delimiter="\t")
         _path, rows, _warnings = layer.build("2026-07-07", meeting_drop_root=root / "meeting_drop", output_root=root / "output")
         assert len(rows) == 1
         assert rows[0]["report_start_date"] == "2026-06-23"

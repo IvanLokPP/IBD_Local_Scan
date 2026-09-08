@@ -13,6 +13,7 @@ MEETING_DROP_ROOT = ROOT / "data" / "input" / "meeting_drop"
 MEETING_PACK_OUTPUT_ROOT = ROOT / "data" / "output" / "meeting_pack"
 SEA6_COUNTRIES = ("SG", "MY", "PH", "ID", "TH", "VN")
 PLATFORMS = ("ios", "android")
+STOREFRONT_OVERRIDE_PATH = ROOT / "data" / "reference" / "mobile_storefront_overrides.csv"
 
 OUTPUT_FIELDS = [
     "unified_id",
@@ -22,6 +23,8 @@ OUTPUT_FIELDS = [
     "developer",
     "genre",
     "platforms",
+    "mobile_storefront_url",
+    "mobile_storefront_url_source",
     "sea_st_gross_revenue",
     "sea_st_downloads",
     "countries_detected",
@@ -106,12 +109,29 @@ def ranking_metrics(ranking_files):
                 continue
             entry = metrics.setdefault((country, key), {"title": title, "publisher": "", "platforms": {}})
             entry["publisher"] = entry["publisher"] or str(row.get("Company") or "").strip()
-            platform_values = entry["platforms"].setdefault(platform, {"rank": "", "app_id": ""})
+            platform_values = entry["platforms"].setdefault(
+                platform, {"rank": "", "app_id": "", "storefront_url": ""}
+            )
             current = int(platform_values["rank"] or 0)
             if not current or rank < current:
                 platform_values["rank"] = str(rank)
                 platform_values["app_id"] = str(row.get("App ID") or "").strip()
+                platform_values["storefront_url"] = str(row.get("App URL") or "").strip()
     return metrics, max(ranking_dates), source_files
+
+
+def read_storefront_overrides(path=STOREFRONT_OVERRIDE_PATH):
+    """Read manually verified official mobile storefronts keyed by Sensor Tower ID."""
+    if not Path(path).exists():
+        return {}
+    overrides = {}
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            unified_id = str(row.get("unified_id") or "").strip()
+            url = str(row.get("mobile_storefront_url") or "").strip()
+            if unified_id and url:
+                overrides[unified_id] = url
+    return overrides
 
 
 def candidate_universe(unified_exports):
@@ -149,6 +169,7 @@ def build_rows(meeting_date, unified_exports, ranking_files):
     title_overrides = mobile.read_title_overrides()
     master_by_id, master_by_title = mobile.read_master_title_mapping()
     known_ids = known_existing_unified_ids()
+    storefront_overrides = read_storefront_overrides()
     sg_export = unified_exports["SG"]
     rows = []
     for unified_id, selected in candidates.items():
@@ -162,6 +183,7 @@ def build_rows(meeting_date, unified_exports, ranking_files):
         by_country = {}
         countries_detected = []
         platforms = set()
+        storefront_urls = []
         publisher = candidate.get("unified_publisher_name", "")
         source_files = {candidate.get("source_file", "")}
         for country in SEA6_COUNTRIES:
@@ -172,6 +194,11 @@ def build_rows(meeting_date, unified_exports, ranking_files):
                 publisher = publisher or ranking["publisher"]
             if platform_values:
                 platforms.update("iOS" if value == "ios" else "Android" for value in platform_values)
+                storefront_urls.extend(
+                    platform_values.get(platform, {}).get("storefront_url", "")
+                    for platform in ("ios", "android")
+                    if platform_values.get(platform, {}).get("storefront_url")
+                )
             revenue = metrics.get("gross", 0.0)
             downloads = metrics.get("downloads", 0.0)
             if revenue or downloads or platform_values:
@@ -192,6 +219,8 @@ def build_rows(meeting_date, unified_exports, ranking_files):
         total_revenue = sum(item["revenue"] for item in by_country.values())
         total_downloads = sum(item["downloads"] for item in by_country.values())
         top_country = max(SEA6_COUNTRIES, key=lambda country: (by_country[country]["revenue"], country))
+        ranking_storefront = next(iter(dict.fromkeys(storefront_urls)), "")
+        verified_storefront = storefront_overrides.get(unified_id, "")
         output = {
             "unified_id": unified_id,
             "game_title": english_title,
@@ -200,6 +229,8 @@ def build_rows(meeting_date, unified_exports, ranking_files):
             "developer": "",
             "genre": candidate.get("category", ""),
             "platforms": ", ".join(sorted(platforms, key=("iOS", "Android").index)),
+            "mobile_storefront_url": verified_storefront or ranking_storefront,
+            "mobile_storefront_url_source": "verified_override" if verified_storefront else ("ranking_export" if ranking_storefront else ""),
             "sea_st_gross_revenue": format_number(total_revenue),
             "sea_st_downloads": format_number(total_downloads),
             "countries_detected": ", ".join(countries_detected),

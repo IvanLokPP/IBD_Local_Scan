@@ -794,12 +794,12 @@ def main_report_classification(row):
     matched = row.get("chart_rank_match_status") == "matched"
     release_date = parse_date(row.get("sg_release_date_reference"))
     old_unmatched = bool(release_date and release_date.year < 2026 and not matched)
-    zero_download_unmatched = downloads == 0 and not matched
+    zero_download = downloads == 0
 
     if old_unmatched:
         return "false", "true", "appendix_old_unmatched_release"
-    if zero_download_unmatched:
-        return "false", "true", "appendix_zero_download_unmatched"
+    if zero_download:
+        return "false", "true", "appendix_zero_download"
     if sg_gross > 3000:
         return "true", "false", "sg_gross_above_3000"
     return "false", "true", "appendix_below_main_threshold"

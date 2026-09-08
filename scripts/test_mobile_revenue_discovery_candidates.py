@@ -1,6 +1,7 @@
 import csv
 import io
 from contextlib import redirect_stdout
+from datetime import date
 from pathlib import Path
 
 import build_mobile_revenue_discovery_candidates as discovery
@@ -552,8 +553,11 @@ def test_unparseable_filename_falls_back_with_warning():
         input_path = Path(tmp) / "manual_export_without_period.csv"
         output_dir = Path(tmp) / "out"
         original_output = discovery.OUTPUT_DIR
+        original_schedule_report_period = discovery.schedule_report_period
         try:
             discovery.OUTPUT_DIR = output_dir
+            # This fixture verifies fallback behaviour independently of the live report calendar.
+            discovery.schedule_report_period = lambda: (date(2026, 7, 14), date(2026, 7, 27))
             write_input(input_path, [row(**{"Date": "Jul 20, 2026"})])
             path, candidates, warnings, _count, clean_path, _clean_rows = discovery.build(input_path)
             assert_true(path.exists(), "fallback output file created")
@@ -565,6 +569,7 @@ def test_unparseable_filename_falls_back_with_warning():
             assert_true(any("Could not parse date range/country" in warning for warning in warnings), "fallback warning")
         finally:
             discovery.OUTPUT_DIR = original_output
+            discovery.schedule_report_period = original_schedule_report_period
 
 
 def test_output_headers_exact():
@@ -919,7 +924,7 @@ def test_main_report_rule_old_unmatched_overrides_high_sg_gross():
     )
 
 
-def test_main_report_rule_zero_download_unmatched_overrides_high_sg_gross():
+def test_main_report_rule_zero_download_overrides_high_sg_gross_when_unmatched():
     result = discovery.main_report_classification(
         {
             "sg_revenue_gross": "9999",
@@ -930,8 +935,24 @@ def test_main_report_rule_zero_download_unmatched_overrides_high_sg_gross():
     )
     assert_equal(
         result,
-        ("false", "true", "appendix_zero_download_unmatched"),
-        "zero download unmatched stays appendix",
+        ("false", "true", "appendix_zero_download"),
+        "zero downloads stay appendix even when SG gross is high",
+    )
+
+
+def test_main_report_rule_zero_download_overrides_high_sg_gross_when_matched():
+    result = discovery.main_report_classification(
+        {
+            "sg_revenue_gross": "9999",
+            "sg_downloads": "0",
+            "chart_rank_match_status": "matched",
+            "sg_release_date_reference": "2026/07/20",
+        }
+    )
+    assert_equal(
+        result,
+        ("false", "true", "appendix_zero_download"),
+        "zero downloads must not enter the main report through a chart match",
     )
 
 
@@ -1021,7 +1042,8 @@ def main():
     test_main_report_rule_sg_gross_above_3000()
     test_main_report_rule_chart_matched_below_3000_stays_appendix()
     test_main_report_rule_old_unmatched_overrides_high_sg_gross()
-    test_main_report_rule_zero_download_unmatched_overrides_high_sg_gross()
+    test_main_report_rule_zero_download_overrides_high_sg_gross_when_unmatched()
+    test_main_report_rule_zero_download_overrides_high_sg_gross_when_matched()
     test_sea6_revenue_does_not_affect_main_inclusion()
     test_expected_current_split_is_4_main_18_appendix_when_fixture_available()
     print("MOBILE_REVENUE_DISCOVERY_CANDIDATES_TEST_PASS")

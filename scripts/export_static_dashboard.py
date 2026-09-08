@@ -320,7 +320,11 @@ def game_layer_reason(row, enriched=None):
             "and current SG revenue crossed the report threshold."
         )
     if enriched:
-        summary = " ".join(part for part in (enriched.get("summary_sentence_1"), enriched.get("summary_sentence_2")) if part)
+        summary = " ".join(
+            part.strip()
+            for part in (enriched.get("summary_sentence_1"), enriched.get("summary_sentence_2"))
+            if part and part.strip().lower() != "unconfirmed"
+        )
         if summary:
             return summary
     classification = row.get("report_classification", "")
@@ -426,6 +430,7 @@ def game_layer_report_rows(meeting_date):
                 "steamdb_reviews": row.get("steamdb_reviews", ""),
                 "steam_url": row.get("steam_url", ""),
                 "mobile_storefront_url": enriched.get("mobile_storefront_url", ""),
+                "console_source_url": enriched.get("console_source_url", ""),
                 "release_date_source_url": enriched.get("release_date_source_url", ""),
                 "source_urls": enriched.get("source_urls", ""),
                 "publisher_source_url": enriched.get("publisher_source_url", ""),
@@ -714,18 +719,15 @@ SEA6_COUNTRY_NAMES = {
 
 
 def country_game_is_included(row, country, report_rows=None):
-    if report_rows:
-        matched = matching_report_row(row, report_rows)
-        if not matched:
-            return False
-        if matched.get("report_classification") == "pc_only":
-            return False
+    # Country tabs are independent report views. A game does not need to be
+    # selected for another SEA market to qualify in its own market.
     prefix = country.lower()
     revenue = safe_float(row.get(f"{prefix}_revenue_gross"))
+    downloads = safe_float(row.get(f"{prefix}_downloads"))
     prior_value = str(row.get(f"{prefix}_revenue_prior_store") or "").strip()
     if prior_value == "" or safe_float(prior_value) != 0:
         return False
-    return revenue > 3000
+    return revenue > 3000 and downloads > 0
 
 
 def included_country_games(sea_games, report_rows=None, country="SG"):
@@ -1093,7 +1095,10 @@ def game_source_url(row):
     explicit_mobile = str(row.get("mobile_storefront_url") or "").strip()
     if explicit_mobile:
         candidates.append(explicit_mobile)
-    for key in ("source_urls", "steam_url", "release_date_source_url", "publisher_source_url", "genre_source_url"):
+    explicit_steam = str(row.get("steam_url") or "").strip()
+    if explicit_steam:
+        candidates.append(explicit_steam)
+    for key in ("source_urls", "release_date_source_url", "publisher_source_url", "genre_source_url"):
         candidates.extend(value.strip() for value in str(row.get(key) or "").split("|") if value.strip())
     for key in ("unified_app_id", "mobile_app_ids"):
         for value in str(row.get(key) or "").split(";"):
@@ -1117,6 +1122,66 @@ def game_source_url(row):
         if preferred:
             return preferred
     return ""
+
+
+def require_canonical_game_urls(rows):
+    """Fail an export if a visible title link diverges from its source-data URL."""
+    errors = []
+    for row in rows:
+        classification = str(row.get("report_classification") or "").strip()
+        if classification == "pc_only":
+            canonical = str(row.get("steam_url") or "").strip()
+        elif classification in {"mobile_only", "mobile_led_cross_platform"}:
+            canonical = str(row.get("mobile_storefront_url") or "").strip()
+        else:
+            canonical = ""
+        if canonical and game_source_url(row) != canonical:
+            errors.append(title_for(row) or "Unnamed game")
+        console = str(row.get("console_source_url") or row.get("Console Source URL") or "").strip()
+        if console and not console.startswith(("https://", "http://")):
+            errors.append((title_for(row) or "Unnamed game") + " (invalid console source)")
+    if errors:
+        raise ValueError("Canonical game URL validation failed: " + ", ".join(errors))
+
+
+def require_country_storefront_urls(sea_games, report_rows):
+    """Country-qualified mobile cards must link to an official storefront."""
+    errors = []
+    for country in SEA6_COUNTRIES:
+        for row in included_country_games(sea_games, report_rows, country):
+            report_row = matching_report_row(row, report_rows)
+            link_row = report_row if game_source_url(report_row) else {**row, "report_classification": "mobile_only"}
+            source = game_source_url(link_row)
+            if not source.startswith(("https://apps.apple.com/", "https://play.google.com/")):
+                errors.append(f"{country}: {row.get('game_title') or row.get('original_title') or 'Unnamed game'}")
+    if errors:
+        raise ValueError("Country storefront validation failed: " + "; ".join(errors))
+
+
+def write_country_storefront_audit(sea_games, report_rows):
+    """Record the exact country-card URLs used by a successful export."""
+    meeting_date = next((str(row.get("meeting_date") or "").strip() for row in sea_games if row.get("meeting_date")), "unknown")
+    path = MEETING_PACK_OUTPUT_ROOT / meeting_date / "country_storefront_url_audit.csv"
+    fields = ["country", "game_title", "publisher", "storefront_url", "url_source", "validation_status"]
+    audit_rows = []
+    for country in SEA6_COUNTRIES:
+        for row in included_country_games(sea_games, report_rows, country):
+            report_row = matching_report_row(row, report_rows)
+            link_row = report_row if game_source_url(report_row) else {**row, "report_classification": "mobile_only"}
+            audit_rows.append({
+                "country": country,
+                "game_title": row.get("game_title") or row.get("original_title") or "Unnamed game",
+                "publisher": row.get("publisher") or "",
+                "storefront_url": game_source_url(link_row),
+                "url_source": row.get("mobile_storefront_url_source") or ("report_enrichment" if game_source_url(report_row) else ""),
+                "validation_status": "official_storefront_confirmed",
+            })
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(audit_rows)
+    return path
 
 
 def game_title_html(title, row):
@@ -1192,6 +1257,7 @@ def steam_context_html(report_row, label="PC equivalent / Steam context"):
 
 def sea_regional_mobile_card(row, report_rows):
     report_row = matching_report_row(row, report_rows)
+    link_row = report_row if game_source_url(report_row) else {**row, "report_classification": "mobile_only"}
     publisher, genre, platforms, summary = sea_game_detail(row, report_rows)
     title = row.get("game_title") or row.get("original_title") or "Untitled"
     original = row.get("original_title") or ""
@@ -1201,7 +1267,7 @@ def sea_regional_mobile_card(row, report_rows):
     continuity = str(report_row.get("Continuity Note") or "").strip()
     continuity_html = f'<div class="continuity-note"><b>Continuity</b><p>{escape(continuity)}</p></div>' if continuity else ""
     return f'''<article class="sea-country-card">
-  <div class="sea-country-card-heading"><h3>{game_title_html(title, report_row)}</h3><span class="metric-badge neutral">{escape(classification)}</span></div>
+  <div class="sea-country-card-heading"><h3>{game_title_html(title, link_row)}</h3><span class="metric-badge neutral">{escape(classification)}</span></div>
 {original_html}
   <div class="sea-company-stack"><p class="sea-company-meta"><b>Publisher</b><span>{escape(publisher)}</span></p></div>
   <div class="meta-chip-row">{genre_html}</div>
@@ -1313,6 +1379,7 @@ def sea_country_card(row, country, report_rows):
     prefix = country.lower()
     publisher, genre, platforms, summary = sea_game_detail(row, report_rows)
     report_row = matching_report_row(row, report_rows)
+    link_row = report_row if game_source_url(report_row) else {**row, "report_classification": "mobile_only"}
     original = row.get("original_title") or ""
     title = row.get("game_title") or original or "Untitled"
     original_html = f'<p class="original-title"><span>Original title</span>{escape(original)}</p>' if original and original != title else ""
@@ -1327,7 +1394,7 @@ def sea_country_card(row, country, report_rows):
         for label, field in (("iOS", f"{prefix}_ios_rank"), ("Android", f"{prefix}_android_rank"))
     )
     return f'''<article class="sea-country-card">
-  <div class="sea-country-card-heading"><h3>{game_title_html(title, report_row)}</h3><span class="metric-badge neutral">{escape(classification_label)}</span></div>
+  <div class="sea-country-card-heading"><h3>{game_title_html(title, link_row)}</h3><span class="metric-badge neutral">{escape(classification_label)}</span></div>
 {original_html}
   <div class="sea-company-stack"><p class="sea-company-meta"><b>Publisher</b><span>{escape(publisher)}</span></p></div>
   <div class="meta-chip-row">{genre_html}</div>
@@ -1411,11 +1478,16 @@ def sea_regional_section(sea_games, report_rows, news_context=None):
             country_news_rows(news_context or [], country),
             heading=f"{name}-related Articles",
             anchor_prefix=f"{prefix}",
-        ) if news_context else ""
+        )
         panels.append(
             f'<section class="sea-view-panel sea-country-panel" id="sea-{prefix}" hidden><div class="section-heading"><div><h2>{name}</h2><p>Country view using {name} Sensor Tower evidence only.</p></div></div><section id="{prefix}-market-snapshot"><h3 class="country-section-label">Market Snapshot</h3><div class="sea-summary-strip"><span><small>ST Gross Revenue</small><b>{escape(money(country_summary["sea_st_gross_revenue"]))}</b></span><span><small>ST Downloads</small><b>{escape(number(country_summary["sea_st_downloads"]))}</b></span><span><small>Included new games</small><b>{country_summary["game_count"]}</b></span></div><p class="rank-limitation-note">{escape(RANK_LIMITATION_NOTE)}</p></section>{grouped_cards}{regional_pc_signals(report_rows, f"{prefix}-pc-only-games")}{country_news}</section>'
         )
-    regional_news = news_context_section(regional_news_rows(news_context or []), heading="SEA6-related Articles", regional=True, anchor_prefix="sea6") if news_context else ""
+    regional_news = news_context_section(
+        regional_news_rows(news_context or []),
+        heading="SEA6-related Articles",
+        regional=True,
+        anchor_prefix="sea6",
+    )
     regional_mobile_rows = list(included)
     included_keys = {normalized_key(row.get("game_title") or row.get("original_title")) for row in regional_mobile_rows}
     for report_row in report_rows:
@@ -2360,8 +2432,11 @@ def main(argv=None):
     rows = game_layer_report_rows(args.meeting_date) if args.meeting_date else source_report_rows(metadata, schedule)
     apply_controlled_genres(rows)
     require_valid_game_genres(rows)
+    require_canonical_game_urls(rows)
     news_context = source_news_context(rows, schedule)
     sea_games = source_sea_game_layer(rows, schedule)
+    require_country_storefront_urls(sea_games, rows)
+    write_country_storefront_audit(sea_games, rows)
     DOCS.mkdir(parents=True, exist_ok=True)
     write_assets()
     write_data(rows, metadata, schedule, weekly_summary, news_context, sea_games)

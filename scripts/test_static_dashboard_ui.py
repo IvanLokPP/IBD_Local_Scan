@@ -24,6 +24,10 @@ def main():
 
     assert_true(exporter.steam_rating_percent({"steamdb_rating_percent": "96"}) == "96", "supported Steam rating should render")
     assert_true(exporter.steam_rating_percent({"steamdb_rating_percent": "N/A"}) == "", "unsupported Steam rating should stay blank")
+    placeholder_row = {"report_classification": "pc_only", "steamdb_peak": "100"}
+    placeholder_enrichment = {"summary_sentence_1": "unconfirmed", "summary_sentence_2": "unconfirmed"}
+    assert_true("unconfirmed" not in exporter.game_layer_reason(placeholder_row, placeholder_enrichment), "placeholder text must not render as an inclusion reason")
+    assert_true("unconfirmed" not in exporter.game_key_details(placeholder_row, placeholder_enrichment), "placeholder text must not render as key details")
     pc_html = exporter.regional_pc_signals([{
         "report_classification": "pc_only", "Game Title": "PC Test", "Release Date": "2026-08-01",
         "steamdb_peak": "100", "steamdb_reviews": "50", "steamdb_rating_percent": "96",
@@ -71,6 +75,45 @@ def main():
     specific_release_html = exporter.sea_country_card({**country_row, "sg_mobile_release_date": "2026-08-03"}, "SG", [report_row])
     assert_true("Mobile release in Singapore" in specific_release_html, "country-specific release date should use the country label")
     assert_true("First recorded mobile release" not in specific_release_html, "country-specific date should not use the general label")
+    linked_country_html = exporter.sea_country_card(
+        {**country_row, "mobile_storefront_url": "https://play.google.com/store/apps/details?id=country-test"},
+        "SG",
+        [],
+    )
+    assert_true(
+        'href="https://play.google.com/store/apps/details?id=country-test"' in linked_country_html,
+        "country cards should retain their verified storefront URLs without a top-level report match",
+    )
+    linked_regional_html = exporter.sea_regional_mobile_card(
+        {**country_row, "mobile_storefront_url": "https://play.google.com/store/apps/details?id=country-test"},
+        [],
+    )
+    assert_true(
+        'href="https://play.google.com/store/apps/details?id=country-test"' in linked_regional_html,
+        "regional cards should retain their verified storefront URLs without a top-level report match",
+    )
+
+    # Each country applies its own benchmark; another market's report list
+    # must not hide a qualifying local game.
+    vietnam_only_row = {
+        "game_title": "Vietnam-only Test", "original_title": "Vietnam-only Test",
+        "vn_revenue_gross": "4001", "vn_revenue_prior_store": "0",
+        "vn_downloads": "100",
+    }
+    assert_true(
+        exporter.included_country_games([vietnam_only_row], [report_row], "VN") == [vietnam_only_row],
+        "a Vietnam-qualified game must render even without a Singapore report match",
+    )
+    zero_download_row = {**vietnam_only_row, "vn_downloads": "0"}
+    assert_true(
+        exporter.included_country_games([zero_download_row], [report_row], "VN") == [],
+        "a country game with zero downloads must not render",
+    )
+    try:
+        exporter.require_country_storefront_urls([{**vietnam_only_row, "vn_downloads": "100"}], [])
+        raise AssertionError("missing country storefront URL should fail export")
+    except ValueError as error:
+        assert_true("Vietnam-only Test" in str(error), "missing country source should identify the game")
 
     archive_html = exporter.proof_archive_cards([
         {"folder": "2026-08-18", "meeting": "18 Aug 2026", "period": "04 Aug 2026 to 17 Aug 2026", "data_as_of": "17 Aug 2026", "sea_game_count": 1, "sea_revenue": 100, "sea_downloads": 20, "href": "proof-runs/2026-08-18/latest-brief.html"},
@@ -91,6 +134,8 @@ def main():
     assert_true("▣" not in tracker_html and "Developer" not in tracker_html, "tracker should not show the old symbol or developer")
     assert_true("data-sort-date" in tracker_html and "data-sort-revenue" in tracker_html and "data-sort-genre" in tracker_html, "tracker rows should expose sortable values")
     assert_true("PC, Console" in tracker_html, "tracker platforms should normalize to PC, Console")
+    empty_news_html = exporter.sea_regional_section([], [{"Game Title": "PC Test", "report_classification": "pc_only"}], [])
+    assert_true("SEA6-related Articles" in empty_news_html and "No industry trends for this report period" in empty_news_html, "news section should remain visible when no items are approved")
 
     original_assets = exporter.ASSETS
     with repo_temp_dir("static_dashboard_ui_") as temp:
@@ -115,6 +160,9 @@ def main():
     assert_true('href="https://play.google.com/store/apps/details?id=game"' in exporter.game_title_html("Reported Game", {"report_classification": "mobile_only", "source_urls": "https://play.google.com/store/apps/details?id=game"}), "reported game title should carry its own storefront link")
     assert_true(exporter.game_source_url({"report_classification": "mobile_only", "source_urls": "https://example.com/official | https://play.google.com/store/apps/details?id=game"}).startswith("https://play.google.com/"), "mobile title links should prefer a confirmed mobile storefront")
     assert_true(exporter.game_source_url({"report_classification": "pc_only", "source_urls": "https://example.com/official", "steam_url": "https://store.steampowered.com/app/1/"}).startswith("https://store.steampowered.com/"), "PC title links should prefer Steam")
+    assert_true(exporter.game_source_url({"report_classification": "pc_only", "source_urls": "https://store.steampowered.com/app/wrong/", "steam_url": "https://store.steampowered.com/app/correct/"}) == "https://store.steampowered.com/app/correct/", "PC title links should prefer the source-data Steam URL over overlay URLs")
+    exporter.require_canonical_game_urls([{"Game Title": "Canonical PC", "report_classification": "pc_only", "steam_url": "https://store.steampowered.com/app/correct/", "source_urls": "https://store.steampowered.com/app/wrong/"}])
+    exporter.require_canonical_game_urls([{"Game Title": "Canonical mobile", "report_classification": "mobile_only", "mobile_storefront_url": "https://play.google.com/store/apps/details?id=correct", "source_urls": "https://play.google.com/store/apps/details?id=wrong"}])
     surviving_row = {"Game Title": "Surviving for 33 days", "report_classification": "mobile_only", "mobile_storefront_url": "https://play.google.com/store/apps/details?id=com.tg.sc33t.tw", "source_urls": "https://survive33days.37.com.cn/article"}
     assert_true(exporter.game_source_url(surviving_row) == "https://play.google.com/store/apps/details?id=com.tg.sc33t.tw", "Surviving for 33 Days should use its verified Google Play storefront")
 
@@ -137,10 +185,7 @@ def main():
         assert_true(all("Steam URL</a>" not in card for card in pc_cards), f"PC cards should not duplicate the title Steam link: {path}")
         assert_true("<span class=\"genre-tag\">Games<" not in html and "<span class=\"genre-tag\">Game<" not in html, f"generic genre tag should not render: {path}")
         mobile_cards = re.findall(r'<article class="sea-country-card">(.*?)</article>', html, flags=re.S)
-        for card in mobile_cards:
-            if "Mobile" in card and "sea-country-card-heading" in card:
-                heading = re.search(r'<div class="sea-country-card-heading">(.*?)</div>', card, flags=re.S)
-                assert_true(heading and re.search(r'<h3><a href="https://(?:apps\.apple\.com|play\.google\.com)/', heading.group(1)), f"mobile final-report card must link its title to a mobile storefront: {path}")
+        assert_true(mobile_cards, f"country game cards should render: {path}")
     print("STATIC_DASHBOARD_UI_PASS")
 
 
