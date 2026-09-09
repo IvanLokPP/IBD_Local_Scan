@@ -1755,7 +1755,7 @@ def table_cell(row, field):
         text = value or row.get("_brief_label", "")
         if href:
             period = row.get("_brief_period") or text
-            return f'<td class="tracker-brief-cell"><a class="brief-icon-link" href="{escape(href)}" title="Open brief: {escape(period)}" aria-label="Open brief for {escape(period)}"><span class="folder-icon" aria-hidden="true"></span></a><span class="brief-period">{escape(period)}</span></td>'
+            return f'<td class="tracker-brief-cell"><a class="brief-icon-link" href="{escape(href)}" target="_blank" rel="noopener" title="Open brief: {escape(period)}" aria-label="Open brief for {escape(period)}"><span class="folder-icon" aria-hidden="true"></span></a><span class="brief-period">{escape(period)}</span></td>'
         return f"<td>{escape(str(text or ''))}</td>"
     if field == "Continuity":
         href = row.get("Continuity Brief Href", "")
