@@ -19,6 +19,12 @@ The project stores workflow data locally and exports a static GitHub Pages dashb
 
 SG discovery is ranking-first. An app becomes a candidate when its app ID appears in SG Games Top Grossing and has not previously appeared in the local SG chart observation ledger. Sensor Tower worldwide release tags and release dates are evidence only; they are not discovery gates. Ranking dates should allow for two full days of Sensor Tower data lag.
 
+## Final Report Selection Rules
+
+- **Mobile cards:** a new Singapore commercial signal: prior SG store revenue is zero, current estimated SG gross revenue is above $3,000, and the title has more than zero downloads. Release age does not exclude a title.
+- **PC cards:** a full game released during the report period with at least 10,000 peak concurrent Steam users. DLC, demos, soundtracks, and software are excluded.
+- **Pre-launch announcements:** reviewed separately from released-game cards; they must be dated inside the report period and pass the news editorial rules.
+
 ## Setup
 
 1. Copy `.env.example` to `.env` for local secrets.

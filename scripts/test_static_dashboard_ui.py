@@ -114,6 +114,11 @@ def main():
         raise AssertionError("missing country storefront URL should fail export")
     except ValueError as error:
         assert_true("Vietnam-only Test" in str(error), "missing country source should identify the game")
+    try:
+        exporter.require_translated_country_titles([{**vietnam_only_row, "vn_downloads": "100", "translation_needed": "true", "original_title": "Tiêu đề"}], [])
+        raise AssertionError("untranslated country title should fail export")
+    except ValueError as error:
+        assert_true("Tiêu đề" in str(error), "untranslated title should identify the game")
 
     archive_html = exporter.proof_archive_cards([
         {"folder": "2026-08-18", "meeting": "18 Aug 2026", "period": "04 Aug 2026 to 17 Aug 2026", "data_as_of": "17 Aug 2026", "sea_game_count": 1, "sea_revenue": 100, "sea_downloads": 20, "href": "proof-runs/2026-08-18/latest-brief.html"},

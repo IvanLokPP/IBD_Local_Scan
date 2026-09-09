@@ -18,6 +18,7 @@ SCHEDULE_PATH = ROOT / "config" / "static_report_schedule.json"
 TITLE_OVERRIDE_PATH = ROOT / "data" / "reference" / "game_title_overrides.csv"
 MASTER_TITLE_MAPPING_PATH = ROOT / "data" / "reference" / "master_title_mapping.csv"
 SEA6_COUNTRIES = ("SG", "MY", "ID", "TH", "PH", "VN")
+MAIN_REPORT_SG_GROSS_THRESHOLD = 3000
 CODEX_FALLBACK_TITLES = {
     "我在江湖開後宮": "Building a Harem in Jianghu",
     "天命：六道輪迴": "Destiny: Six Realms of Reincarnation",
@@ -776,6 +777,11 @@ def mostly_english_name(value):
     text = str(value or "").strip()
     if not text:
         return False
+    # A mixed Latin/local-language title needs an explicit English display
+    # mapping. A high Latin-character ratio is not enough (for example,
+    # "Girls' Frontline 2: Luu Day").
+    if any(ord(char) > 127 for char in text):
+        return False
     letters = [char for char in text if char.isalpha()]
     if not letters:
         return True
@@ -789,18 +795,21 @@ def display_rank(value):
 
 
 def main_report_classification(row):
+    """Apply the IBD mobile-card rule for a new SG commercial signal.
+
+    Release age and chart rank are supporting evidence only.  A title belongs
+    in the report when it is newly commercial in SG for this run (prior store
+    revenue is zero), has downloads, and clears the SG gross-revenue bar.
+    """
     sg_gross = parse_number(row.get("sg_revenue_gross"))
     downloads = parse_number(row.get("sg_downloads"))
-    matched = row.get("chart_rank_match_status") == "matched"
-    release_date = parse_date(row.get("sg_release_date_reference"))
-    old_unmatched = bool(release_date and release_date.year < 2026 and not matched)
-    zero_download = downloads == 0
+    prior_store = parse_number(row.get("sg_revenue_prior_store"))
 
-    if old_unmatched:
-        return "false", "true", "appendix_old_unmatched_release"
-    if zero_download:
+    if downloads <= 0:
         return "false", "true", "appendix_zero_download"
-    if sg_gross > 3000:
+    if prior_store != 0:
+        return "false", "true", "appendix_not_new_sg_commercial_signal"
+    if sg_gross > MAIN_REPORT_SG_GROSS_THRESHOLD:
         return "true", "false", "sg_gross_above_3000"
     return "false", "true", "appendix_below_main_threshold"
 

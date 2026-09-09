@@ -19,6 +19,8 @@ OUTPUT_FIELDS = [
     "unified_id",
     "game_title",
     "original_title",
+    "translation_needed",
+    "title_resolution_source",
     "publisher",
     "developer",
     "genre",
@@ -177,7 +179,7 @@ def build_rows(meeting_date, unified_exports, ranking_files):
         candidate_by_country = selected.get("by_country", {})
         title = candidate.get("unified_name", "")
         title_key = mobile.normalize_app_name(title)
-        english_title, _translation_needed, _source = mobile.resolve_english_report_name(
+        english_title, translation_needed, title_resolution_source = mobile.resolve_english_report_name(
             candidate, title_overrides, master_by_id, master_by_title
         )
         by_country = {}
@@ -225,6 +227,8 @@ def build_rows(meeting_date, unified_exports, ranking_files):
             "unified_id": unified_id,
             "game_title": english_title,
             "original_title": title,
+            "translation_needed": translation_needed,
+            "title_resolution_source": title_resolution_source,
             "publisher": publisher,
             "developer": "",
             "genre": candidate.get("category", ""),

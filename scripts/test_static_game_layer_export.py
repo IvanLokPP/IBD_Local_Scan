@@ -64,6 +64,7 @@ NEWS_FIELDS = [
     "final_report_section",
     "editor_decision",
     "editor_note",
+    "release_timing",
     "key_details",
     "why_it_matters",
 ]
@@ -338,6 +339,7 @@ def main():
                         "final_report_section": "Game Announcements",
                         "editor_decision": "include",
                         "editor_note": "Reviewed announcement note.",
+                        "release_timing": "12 August 2026",
                         "key_details": "Call of Duty: Modern Warfare 4 has a future release date reported by the source.",
                         "why_it_matters": "A future release watch relevant to the report period.",
                     },
@@ -356,6 +358,7 @@ def main():
                         "final_report_section": "Game Announcements",
                         "editor_decision": "include",
                         "editor_note": "Should be filtered by event date.",
+                        "release_timing": "15 August 2026",
                     },
                     {
                         "meeting_date": "2026-08-04",
@@ -373,6 +376,7 @@ def main():
                         "final_report_section": "Game Announcements",
                         "editor_decision": "include",
                         "editor_note": "Approved regional announcement.",
+                        "release_timing": "Technical test: 30 July 2026",
                         "key_details": "The source reports a regional launch announcement and technical test.",
                         "why_it_matters": "Regional launch context relevant across SEA6.",
                     },
@@ -612,6 +616,7 @@ def main():
             assert_true("Embracer completed a separate publishing acquisition" in second_card, "second acquisition should use its own editorial key details")
             assert_true("Electronic Arts completed" not in second_card, "second acquisition must not inherit EA-specific text")
             assert_true("Call of Duty: Modern Warfare 4 has a future release date reported by the source." in latest_html, "reviewed news key details should render")
+            assert_true("Release / availability:" in latest_html, "game announcement cards should show verified release timing")
             assert_true("Regional launch context relevant across SEA6." in latest_html, "approved blank-score regional relevance should render")
             assert_true("Game Announcement" in latest_html and "High-score announcement" not in latest_html, "announcement cards should use the neutral Game Announcement label")
             assert_true(not re.search(r"Score\s+[-+]?\d", latest_html), "news cards should not show score badges")

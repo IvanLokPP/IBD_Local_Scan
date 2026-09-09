@@ -49,15 +49,24 @@ def main():
             assert_true(len(rows) == 2, "review copies every raw row")
             assert_true(all(not row[field] for row in rows for field in review.REVIEW_FIELDS), "review defaults are blank")
             assert_true(exporter.source_news_context([], {"upcoming_meeting_date": "2026-07-28"}) == [], "blank review rows are not included")
+            auto_row = {
+                "title": "Major game opens beta registration", "title_en": "Major game opens beta registration",
+                "url": "https://example.com/beta", "context_type": "high_score_game_announcement",
+                "source_tier": "major_gaming_media", "hot_score": "85",
+            }
+            assert_true(review.auto_approved_announcement(auto_row), "credible launch announcement should qualify for automatic inclusion")
+            assert_true(not review.auto_approved_announcement({**auto_row, "title": "Game release reportedly leaked"}), "rumours must not be auto-included")
 
             rows[0]["include_in_final_report"] = "yes"
             rows[0]["final_report_section"] = "Game Announcements"
             rows[0]["editor_decision"] = "include"
             rows[0]["editor_note"] = "Approved fixture row"
+            rows[0]["release_timing"] = "Release date not announced in source."
             write_csv(destination, rows, RAW_FIELDS + review.REVIEW_FIELDS)
             _, regenerated = review.build("2026-07-28")
             assert_true(regenerated[0]["include_in_final_report"] == "yes", "regeneration preserves include decision")
             assert_true(regenerated[0]["editor_note"] == "Approved fixture row", "regeneration preserves editor note")
+            assert_true(regenerated[0]["release_timing"] == "Release date not announced in source.", "regeneration preserves release timing")
             rows[0]["key_details"] = "Fixture factual details."
             rows[0]["why_it_matters"] = "Fixture relevance."
             write_csv(destination, rows, RAW_FIELDS + review.REVIEW_FIELDS)
@@ -92,6 +101,7 @@ def main():
                     "context_type": "high_score_game_announcement",
                     "include_in_final_report": "yes",
                     "editor_decision": "include",
+                    "release_timing": "12 September 2026",
                 },
                 {
                     "title": "GTA 6 pre-order demand reaches a new record",
@@ -101,6 +111,7 @@ def main():
                     "include_in_final_report": "yes",
                     "final_report_section": "Game Announcements",
                     "editor_decision": "include",
+                    "release_timing": "Release date not announced in source.",
                 },
             ]
             write_csv(destination, filtered_rows, RAW_FIELDS + review.REVIEW_FIELDS)
@@ -141,6 +152,7 @@ def main():
                     "include_in_final_report": "yes",
                     "final_report_section": "Game Announcements",
                     "editor_decision": "include",
+                    "release_timing": "Pre-registration: 14 August 2026",
                 }
             )
             write_csv(destination, [review_row], RAW_FIELDS + review.REVIEW_FIELDS)

@@ -330,6 +330,13 @@ def test_peak_above_10000_promotes_main_candidate():
     assert_equal(result["pc_report_reason"], "steamdb_peak_above_10000_in_report_period", "peak reason")
 
 
+def test_current_run_style_pc_peak_below_threshold_stays_appendix():
+    row = {"pc_title": "Below Threshold", "release_date": "2026-07-20", "steamdb_peak": "9999"}
+    result = pc.classify_pc_row(row, pc.parse_date("2026-07-14"), pc.parse_date("2026-07-26"), {})
+    assert_equal(result["pc_main_report_candidate"], "false", "9,999 peak stays appendix")
+    assert_equal(result["pc_appendix_candidate"], "true", "9,999 peak is appendix")
+
+
 def test_release_date_outside_period_does_not_promote_by_peak():
     row = {"pc_title": "Old Peak", "release_date": "2026-05-15", "steamdb_peak": "50000"}
     result = pc.classify_pc_row(row, pc.parse_date("2026-07-14"), pc.parse_date("2026-07-26"), {})
@@ -390,6 +397,7 @@ def main():
     test_output_headers_are_stable()
     test_source_metadata_columns_exist()
     test_peak_above_10000_promotes_main_candidate()
+    test_current_run_style_pc_peak_below_threshold_stays_appendix()
     test_release_date_outside_period_does_not_promote_by_peak()
     test_exact_mobile_title_match_promotes_main_candidate()
     test_dlc_demo_soundtrack_software_exclusions_work()

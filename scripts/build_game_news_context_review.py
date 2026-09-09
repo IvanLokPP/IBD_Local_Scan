@@ -1,5 +1,6 @@
 import argparse
 import csv
+import re
 from pathlib import Path
 
 
@@ -12,10 +13,29 @@ REVIEW_FIELDS = [
     "final_report_section",
     "editor_decision",
     "editor_note",
+    "release_timing",
     "key_details",
     "why_it_matters",
 ]
 PRESERVED_EDITORIAL_FIELDS = REVIEW_FIELDS + ["title_en"]
+AUTO_ANNOUNCEMENT_LIMIT = 5
+AUTO_ANNOUNCEMENT_SOURCES = {
+    "official_publisher",
+    "official_platform",
+    "major_gaming_media",
+    "business_industry_media",
+    "regional_gaming_media",
+}
+AUTO_ANNOUNCEMENT_PATTERN = re.compile(
+    r"\b(announc(?:e|ed|ement)|launch(?:es|ed)?|release(?:s|d)?|release date|"
+    r"soft launch|open(?:s|ed)? (?:for )?pre[- ]registration|beta|demo)\b",
+    re.I,
+)
+AUTO_ANNOUNCEMENT_EXCLUSION = re.compile(
+    r"\b(leak|rumou?r|reportedly|likely|discount|bundle|merch|soundtrack|hardware|"
+    r"dlss|console|every rpg|release dates|crocs|jibbitz|not announcing|milestone)\b",
+    re.I,
+)
 
 
 def read_csv(path):
@@ -50,6 +70,32 @@ def is_approved(row):
     )
 
 
+def auto_approved_announcement(row):
+    """Select a small set of credible, in-period launch announcements."""
+    if row.get("context_type") != "high_score_game_announcement":
+        return False
+    if str(row.get("source_tier") or "").strip() not in AUTO_ANNOUNCEMENT_SOURCES:
+        return False
+    try:
+        score = int(str(row.get("hot_score") or "0"))
+    except ValueError:
+        return False
+    title = " ".join(str(row.get(field) or "") for field in ("title", "title_en"))
+    return score >= 70 and bool(AUTO_ANNOUNCEMENT_PATTERN.search(title)) and not AUTO_ANNOUNCEMENT_EXCLUSION.search(title)
+
+
+def apply_auto_approval(row):
+    title = str(row.get("title_en") or row.get("title") or "A game announcement").strip().rstrip(".")
+    row["include_in_final_report"] = "yes"
+    row["final_report_section"] = "Game Announcements"
+    row["editor_decision"] = "include"
+    row["editor_note"] = "Automatically selected from a reputable in-period launch announcement."
+    row["release_timing"] = ""
+    row["key_details"] = f"{title}."
+    row["why_it_matters"] = "A credible in-period launch, release, beta, demo, or pre-registration update relevant to game-market monitoring."
+    return row
+
+
 def build(meeting_date):
     source = raw_path(meeting_date)
     destination = review_path(meeting_date)
@@ -60,16 +106,21 @@ def build(meeting_date):
 
     rows = []
     fields = list(raw_rows[0].keys()) if raw_rows else []
+    auto_approved = 0
     for raw in raw_rows:
         row = dict(raw)
         prior = existing.get(row_key(raw), {})
+        prior_is_automatic = str(prior.get("editor_note") or "").startswith("Automatically selected")
         for field in PRESERVED_EDITORIAL_FIELDS:
             if field == "title_en":
                 # Keep an editor's translated/normalised display title, but
                 # retain a fresh Radar translation when no override exists.
                 row[field] = prior.get(field) or row.get(field, "")
             else:
-                row[field] = prior.get(field, "")
+                row[field] = "" if prior_is_automatic else prior.get(field, "")
+        if not row.get("editor_decision") and auto_approved < AUTO_ANNOUNCEMENT_LIMIT and auto_approved_announcement(row):
+            row = apply_auto_approval(row)
+            auto_approved += 1
         rows.append(row)
 
     # Radar snapshots age out. Keep a prior approved editorial item even when

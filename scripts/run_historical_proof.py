@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import re
 import shutil
@@ -122,6 +123,23 @@ def copy_outputs(meeting_date):
     print(f"Copied proof outputs to {destination}")
 
 
+def apply_report_period(meeting_date, report_start, report_end):
+    """Keep the report contract separate from mobile-source coverage."""
+    path = ROOT / "data" / "output" / "meeting_pack" / meeting_date / "game_report_layer.csv"
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        return
+    fields = list(rows[0].keys())
+    for row in rows:
+        row["report_start_date"] = report_start
+        row["report_end_date"] = report_end
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run a local historical IBD game-layer proof workflow.")
     parser.add_argument("--meeting-date", required=True, type=parse_iso_date)
@@ -136,8 +154,16 @@ def main(argv=None):
     report_end = args.report_end.isoformat()
 
     run_step("mobile discovery", "build_mobile_revenue_discovery_candidates.py", "--meeting-date", meeting_date)
-    run_step("PC discovery", "build_pc_steamdb_discovery_candidates.py", "--meeting-date", meeting_date, "--source-kind", "top-releases")
+    run_step(
+        "PC discovery",
+        "build_pc_steamdb_discovery_candidates.py",
+        "--meeting-date", meeting_date,
+        "--source-kind", "top-releases",
+        "--report-start", report_start,
+        "--report-end", report_end,
+    )
     run_step("game report layer", "build_game_report_layer.py", "--meeting-date", meeting_date)
+    apply_report_period(meeting_date, report_start, report_end)
     run_step("game enrichment layer", "build_game_enrichment_layer.py", "--meeting-date", meeting_date)
     news_args = [
         "--meeting-date", meeting_date,

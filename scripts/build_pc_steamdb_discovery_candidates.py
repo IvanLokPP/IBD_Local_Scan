@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MAIN_REPORT_STEAM_PEAK_THRESHOLD = 10000
 MEETING_DROP_ROOT = ROOT / "data" / "input" / "meeting_drop"
 MEETING_PACK_OUTPUT_ROOT = ROOT / "data" / "output" / "meeting_pack"
 
@@ -402,10 +403,25 @@ def load_steamdb_html(meeting_date, steamdb_week):
 def load_top_releases_html(meeting_date, report_start, report_end):
     path = top_releases_html_path(meeting_date, report_start, report_end)
     if not path.exists():
-        raise RuntimeError(f"SteamDB top releases HTML file missing: {path}")
+        matches = []
+        for candidate in pc_input_dir(meeting_date).glob("steamdb_top_releases_*_game_rpg.html"):
+            html = candidate.read_text(encoding="utf-8", errors="replace")
+            start_match = re.search(r'name="min_release"\s+value="(\d{4}-\d{2}-\d{2})"', html)
+            end_match = re.search(r'name="max_release"\s+value="(\d{4}-\d{2}-\d{2})"', html)
+            start_date = parse_date(start_match.group(1)) if start_match else None
+            end_date = parse_date(end_match.group(1)) if end_match else None
+            if start_date == report_start and end_date == report_end:
+                matches.append((candidate, html))
+        if len(matches) != 1:
+            raise RuntimeError(f"SteamDB top releases HTML file missing or period-mismatched: {path}")
+        path, html = matches[0]
+    else:
+        html = path.read_text(encoding="utf-8", errors="replace")
     source_url_path = top_releases_source_url_path(meeting_date, report_start, report_end)
+    if not source_url_path.exists():
+        source_url_path = path.with_name(path.stem + "_source_url.txt")
     source_url = source_url_path.read_text(encoding="utf-8").strip() if source_url_path.exists() else ""
-    return path.read_text(encoding="utf-8", errors="replace"), source_url, path.name
+    return html, source_url, path.name
 
 
 def normalize_steamdb_weeks(steamdb_week=None, steamdb_weeks=None):
@@ -482,7 +498,7 @@ def classify_pc_row(row, report_start, report_end, mobile_index):
                 "pc_report_reason": "matched_mobile_main_game",
             }
         )
-    elif in_period and peak >= 10000:
+    elif in_period and peak >= MAIN_REPORT_STEAM_PEAK_THRESHOLD:
         base.update(
             {
                 "pc_main_report_candidate": "true",
@@ -513,10 +529,10 @@ def dedupe_pc_items(items):
     return list(by_app_id.values())
 
 
-def build(meeting_date, steamdb_week=None, steamdb_weeks=None, source_kind=SOURCE_KIND_WEEKLY):
+def build(meeting_date, steamdb_week=None, steamdb_weeks=None, source_kind=SOURCE_KIND_WEEKLY, report_start_override=None, report_end_override=None):
     report_start_text, report_end_text, mobile_index = mobile_title_index(meeting_date)
-    report_start = parse_date(report_start_text)
-    report_end = parse_date(report_end_text)
+    report_start = parse_date(report_start_override) or parse_date(report_start_text)
+    report_end = parse_date(report_end_override) or parse_date(report_end_text)
     if not report_start or not report_end:
         raise RuntimeError("Could not parse report period from mobile_main_report.csv")
 
@@ -594,6 +610,8 @@ def main():
     parser.add_argument("--source-kind", choices=[SOURCE_KIND_WEEKLY, "top-releases", SOURCE_KIND_TOP_RELEASES], default=SOURCE_KIND_WEEKLY)
     parser.add_argument("--steamdb-week")
     parser.add_argument("--steamdb-weeks")
+    parser.add_argument("--report-start")
+    parser.add_argument("--report-end")
     args = parser.parse_args()
 
     source_kind = SOURCE_KIND_TOP_RELEASES if args.source_kind == "top-releases" else args.source_kind
@@ -603,10 +621,17 @@ def main():
             args.meeting_date,
             steamdb_weeks=",".join(weeks),
             source_kind=source_kind,
+            report_start_override=args.report_start,
+            report_end_override=args.report_end,
         )
     else:
         weeks = []
-        path, rows, appendix_path, appendix, source_file = build(args.meeting_date, source_kind=source_kind)
+        path, rows, appendix_path, appendix, source_file = build(
+            args.meeting_date,
+            source_kind=source_kind,
+            report_start_override=args.report_start,
+            report_end_override=args.report_end,
+        )
     main_rows = [row for row in rows if row["pc_main_report_candidate"] == "true"]
     print(f"Meeting date: {args.meeting_date}")
     print(f"Source kind: {source_kind}")

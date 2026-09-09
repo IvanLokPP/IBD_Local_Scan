@@ -442,6 +442,8 @@ def game_layer_report_rows(meeting_date):
                 "Continuity Brief Href": enriched.get("continuity_brief_href") or row.get("continuity_brief_href", ""),
                 "Continuity": continuity_table_text(enriched.get("continuity_note") or row.get("continuity_note", "")),
                 "registry_game_id": "" if str(enriched.get("registry_game_id") or row.get("registry_game_id", "")).strip().lower() == "unconfirmed" else (enriched.get("registry_game_id") or row.get("registry_game_id", "")),
+                "mobile_source_period": row.get("mobile_source_period", ""),
+                "pc_source_period": row.get("pc_source_period", ""),
             }
         )
     return report_rows
@@ -652,12 +654,12 @@ def source_news_context(rows, schedule):
     meeting_date = meeting_date_key(rows, schedule)
     if not meeting_date:
         return []
+    review_rows = read_csv(MEETING_PACK_OUTPUT_ROOT / meeting_date / NEWS_CONTEXT_FILENAME)
     if not rows:
         period_start, period_end, _ranking_date = schedule_report_dates(schedule)
     else:
         period_start = parse_date(rows[0].get("report_start_date", ""))
         period_end = parse_date(rows[0].get("report_end_date", ""))
-    review_rows = read_csv(MEETING_PACK_OUTPUT_ROOT / meeting_date / NEWS_CONTEXT_FILENAME)
     output = []
     for row in review_rows:
         if row.get("context_type") == "selected_game_release_news":
@@ -669,6 +671,8 @@ def source_news_context(rows, schedule):
         decision = str(row.get("editor_decision") or "").strip().lower()
         include_value = str(row.get("include_in_final_report") or "").strip().lower()
         if decision in {"exclude", "watchlist"} or include_value != "yes":
+            continue
+        if context_type == "high_score_game_announcement" and not str(row.get("release_timing") or "").strip():
             continue
         event_date = parse_date(row.get("event_date")) or parse_date(row.get("published_at"))
         if period_start and period_end and (not event_date or not period_start <= event_date <= period_end):
@@ -841,21 +845,23 @@ def weekly_staging_payload(weekly_summary, schedule):
 def data_as_of(metadata, rows=None):
     value = metadata.get("sensor_tower_data_as_of_date") or metadata.get("last_successful_sensor_tower_report_end_date")
     value_date = parse_date(value)
-    report_end = parse_date((rows or [{}])[0].get("report_end_date", "")) if rows else None
-    if report_end and (not value_date or value_date < report_end):
-        value_date = report_end
     return display_date(value_date.isoformat()) if value_date else "N/A"
 
 
 def normalized_metadata(metadata, rows):
+    # Sensor Tower's cutoff is distinct from the overall report period. Use
+    # the mobile source-period end when this report was built from local
+    # exports, rather than stale global extraction metadata.
     normalized = dict(metadata)
-    if rows:
-        report_end = rows[0].get("report_end_date", "")
-        value_date = parse_date(normalized.get("sensor_tower_data_as_of_date", ""))
-        report_end_date = parse_date(report_end)
-        if report_end_date and (not value_date or value_date < report_end_date):
-            normalized["sensor_tower_data_as_of_date"] = report_end
-            normalized["last_successful_sensor_tower_report_end_date"] = report_end
+    mobile_ends = []
+    for row in rows:
+        _start, end = parse_source_period(row.get("mobile_source_period"))
+        if end:
+            mobile_ends.append(end)
+    if mobile_ends:
+        cutoff = max(mobile_ends).isoformat()
+        normalized["sensor_tower_data_as_of_date"] = cutoff
+        normalized["last_successful_sensor_tower_report_end_date"] = cutoff
     return normalized
 
 
@@ -1066,14 +1072,17 @@ def sea_game_detail(row, report_rows):
     key = normalized_key(row.get("game_title") or row.get("original_title"))
     match = next((item for item in report_rows if normalized_key(title_for(item)) == key), {})
     publisher = row.get("publisher") or match.get("Publisher") or "Publisher unavailable"
-    generic_genres = {"game", "games", "unknown", "unconfirmed", "n/a", "na"}
+    generic_genres = {"", "none", "game", "games", "unknown", "unconfirmed", "n/a", "na"}
     genre_candidates = (match.get("Genre"), row.get("genre"))
     genre = next((str(value).strip() for value in genre_candidates if str(value or "").strip().lower() not in generic_genres), "")
     platforms = row.get("platforms") or match.get("Platform") or "iOS, Android"
-    summary = match.get("Key Details") or (
-        f'{row.get("game_title") or row.get("original_title") or "This game"} is a {genre.lower()} tracked through Sensor Tower SEA6 evidence. '
-        f'It appears in {row.get("countries_detected") or "the SEA6 region"}.'
-    )
+    title = row.get("game_title") or row.get("original_title") or "This game"
+    if match.get("Key Details"):
+        summary = match["Key Details"]
+    elif genre:
+        summary = f"{title} is a {genre.lower()} mobile game recorded in the Sensor Tower exports for {row.get('countries_detected') or 'SEA6'} during the covered mobile-data period."
+    else:
+        summary = f"{title} is a mobile title from {publisher} recorded in the Sensor Tower exports for {row.get('countries_detected') or 'SEA6'} during the covered mobile-data period."
     sentences = re.split(r"(?<=[.!?])\s+", str(summary).strip())
     if len(sentences) == 1:
         summary = sentences[0] + " Its SEA6 performance is shown below."
@@ -1156,6 +1165,17 @@ def require_country_storefront_urls(sea_games, report_rows):
                 errors.append(f"{country}: {row.get('game_title') or row.get('original_title') or 'Unnamed game'}")
     if errors:
         raise ValueError("Country storefront validation failed: " + "; ".join(errors))
+
+
+def require_translated_country_titles(sea_games, report_rows):
+    """Do not publish a country card with an unresolved local-language title."""
+    errors = []
+    for country in SEA6_COUNTRIES:
+        for row in included_country_games(sea_games, report_rows, country):
+            if str(row.get("translation_needed") or "").strip().lower() == "true":
+                errors.append(f"{country}: {row.get('original_title') or row.get('game_title') or 'Unnamed game'}")
+    if errors:
+        raise ValueError("Country title translation validation failed: " + "; ".join(errors))
 
 
 def write_country_storefront_audit(sea_games, report_rows):
@@ -1790,6 +1810,7 @@ def news_context_card(row, label):
     title = row.get("title_en") or row.get("title") or "Untitled news item"
     source = row.get("source") or "Unknown source"
     event_date = display_date(row.get("event_date")) or display_date(row.get("published_at")) or "Date unavailable"
+    release_timing = str(row.get("release_timing") or "").strip()
     matched = row.get("matched_report_game")
     reason = row.get("editor_note") or row.get("inclusion_reason") or "Qualified through Game News Radar context rules."
     url = row.get("url") or "#"
@@ -1810,6 +1831,7 @@ def news_context_card(row, label):
         f'  <div class="meta-chip-row"><span class="metric-badge neutral">{escape(label)}</span><span class="metric-badge neutral">{escape(event_date)}</span></div>',
         f"  <h3>{escape(title)}</h3>",
         f"  <p><b>Source:</b> {escape(source)}</p>",
+        f"  <p><b>Release / availability:</b> {escape(release_timing)}</p>" if label == "Game Announcement" and release_timing else "",
     ]
     if matched_html:
         parts.append(f"  {matched_html}")
@@ -2436,7 +2458,9 @@ def main(argv=None):
     news_context = source_news_context(rows, schedule)
     sea_games = source_sea_game_layer(rows, schedule)
     require_country_storefront_urls(sea_games, rows)
+    require_translated_country_titles(sea_games, rows)
     write_country_storefront_audit(sea_games, rows)
+    metadata = normalized_metadata(metadata, rows)
     DOCS.mkdir(parents=True, exist_ok=True)
     write_assets()
     write_data(rows, metadata, schedule, weekly_summary, news_context, sea_games)

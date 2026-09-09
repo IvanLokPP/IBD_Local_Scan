@@ -880,16 +880,19 @@ def test_translation_needed_count_decreases_after_lookup():
     )
 
 
-def test_main_report_rule_sg_gross_above_3000():
+def test_current_run_style_new_sg_commercial_signal_is_main_report():
     result = discovery.main_report_classification(
         {
+            "unified_name": "Pop Epoch: Civilization Tycoon",
             "sg_revenue_gross": "3001",
             "sg_downloads": "1",
-            "chart_rank_match_status": "unmatched",
-            "sg_release_date_reference": "2026/07/20",
+            "sg_revenue_prior_store": "0",
+            # An older release remains eligible when it is a newly detected
+            # commercial signal in this reporting window.
+            "sg_release_date_reference": "2025/11/25",
         }
     )
-    assert_equal(result, ("true", "false", "sg_gross_above_3000"), "SG gross threshold main")
+    assert_equal(result, ("true", "false", "sg_gross_above_3000"), "new SG commercial signal main")
 
 
 def test_main_report_rule_chart_matched_below_3000_stays_appendix():
@@ -897,30 +900,28 @@ def test_main_report_rule_chart_matched_below_3000_stays_appendix():
         {
             "sg_revenue_gross": "1000",
             "sg_downloads": "1",
-            "chart_rank_match_status": "matched",
-            "sg_release_date_reference": "2025/01/01",
+            "sg_revenue_prior_store": "0",
         }
     )
     assert_equal(
         result,
         ("false", "true", "appendix_below_main_threshold"),
-        "chart match should not bypass the strict SG gross threshold",
+        "new signal must still clear the strict SG gross threshold",
     )
 
 
-def test_main_report_rule_old_unmatched_overrides_high_sg_gross():
+def test_existing_sg_commercial_signal_stays_appendix_even_when_revenue_is_high():
     result = discovery.main_report_classification(
         {
             "sg_revenue_gross": "9999",
             "sg_downloads": "1",
-            "chart_rank_match_status": "unmatched",
-            "sg_release_date_reference": "2025/12/31",
+            "sg_revenue_prior_store": "25",
         }
     )
     assert_equal(
         result,
-        ("false", "true", "appendix_old_unmatched_release"),
-        "old unmatched release stays appendix",
+        ("false", "true", "appendix_not_new_sg_commercial_signal"),
+        "existing SG commercial signal stays appendix",
     )
 
 
@@ -929,8 +930,7 @@ def test_main_report_rule_zero_download_overrides_high_sg_gross_when_unmatched()
         {
             "sg_revenue_gross": "9999",
             "sg_downloads": "0",
-            "chart_rank_match_status": "unmatched",
-            "sg_release_date_reference": "2026/07/20",
+            "sg_revenue_prior_store": "0",
         }
     )
     assert_equal(
@@ -945,8 +945,7 @@ def test_main_report_rule_zero_download_overrides_high_sg_gross_when_matched():
         {
             "sg_revenue_gross": "9999",
             "sg_downloads": "0",
-            "chart_rank_match_status": "matched",
-            "sg_release_date_reference": "2026/07/20",
+            "sg_revenue_prior_store": "0",
         }
     )
     assert_equal(
@@ -961,8 +960,7 @@ def test_sea6_revenue_does_not_affect_main_inclusion():
         {
             "sg_revenue_gross": "999",
             "sg_downloads": "10",
-            "chart_rank_match_status": "unmatched",
-            "sg_release_date_reference": "2026/07/20",
+            "sg_revenue_prior_store": "0",
             "sea_market_1_revenue_gross": "1000000",
         }
     )
@@ -973,7 +971,7 @@ def test_sea6_revenue_does_not_affect_main_inclusion():
     )
 
 
-def test_expected_current_split_is_4_main_18_appendix_when_fixture_available():
+def test_current_fixture_uses_new_commercial_signal_policy_when_available():
     if not discovery.meeting_mobile_dir("2026-07-28").exists():
         return
     with repo_temp_dir("mobile_current_split_") as tmp:
@@ -985,8 +983,8 @@ def test_expected_current_split_is_4_main_18_appendix_when_fixture_available():
             discovery.TITLE_OVERRIDE_PATH = tmp / "reference" / "game_title_overrides.csv"
             _path, rows, _warnings, _folder, _chart_paths, _translation_path, _translation_rows, _created, _main_path, main_rows, _appendix_path, appendix, _sources, _fallback = discovery.build_meeting_pack("2026-07-28")
             assert_equal(len(rows), 22, "current meeting pack rows")
-            assert_equal(len(main_rows), 4, "current main split")
-            assert_equal(len(appendix), 18, "current appendix split")
+            assert_equal(len(main_rows), 5, "current main split")
+            assert_equal(len(appendix), 17, "current appendix split")
             assert_equal(
                 [row["unified_name"] for row in main_rows],
                 [
@@ -994,8 +992,9 @@ def test_expected_current_split_is_4_main_18_appendix_when_fixture_available():
                     "DIGIMON UP",
                     "hololive Dreams",
                     "車車屍搭普 - 足球狂歡季來臨！",
+                    "The Walking Dead: Aftermath",
                 ],
-                "current main report games",
+                "older titles remain eligible when newly commercial in SG",
             )
         finally:
             discovery.MEETING_PACK_OUTPUT_ROOT = original_output_root
@@ -1039,13 +1038,13 @@ def main():
     test_meeting_pack_headers_exact()
     test_main_report_rows_have_no_blank_english_report_name()
     test_translation_needed_count_decreases_after_lookup()
-    test_main_report_rule_sg_gross_above_3000()
+    test_current_run_style_new_sg_commercial_signal_is_main_report()
     test_main_report_rule_chart_matched_below_3000_stays_appendix()
-    test_main_report_rule_old_unmatched_overrides_high_sg_gross()
+    test_existing_sg_commercial_signal_stays_appendix_even_when_revenue_is_high()
     test_main_report_rule_zero_download_overrides_high_sg_gross_when_unmatched()
     test_main_report_rule_zero_download_overrides_high_sg_gross_when_matched()
     test_sea6_revenue_does_not_affect_main_inclusion()
-    test_expected_current_split_is_4_main_18_appendix_when_fixture_available()
+    test_current_fixture_uses_new_commercial_signal_policy_when_available()
     print("MOBILE_REVENUE_DISCOVERY_CANDIDATES_TEST_PASS")
 
 
