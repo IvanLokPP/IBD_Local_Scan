@@ -62,6 +62,7 @@ NEWS_CONTEXT_FIELDS = [
     "editor_note",
     "key_details",
     "why_it_matters",
+    "release_timing",
 ]
 
 
@@ -165,6 +166,7 @@ def write_news_context_csv(path):
                     "editor_note": "Fixture-approved context",
                     "key_details": "The source reports a future game announcement.",
                     "why_it_matters": "A future release watch relevant to this brief.",
+                    "release_timing": "1 Oct 2026",
                 }
             )
         writer = csv.DictWriter(handle, fieldnames=NEWS_CONTEXT_FIELDS)

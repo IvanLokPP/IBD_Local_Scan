@@ -1178,6 +1178,23 @@ def require_translated_country_titles(sea_games, report_rows):
         raise ValueError("Country title translation validation failed: " + "; ".join(errors))
 
 
+def require_release_dates(rows, sea_games):
+    """A released-game export must never publish a card without a usable release date."""
+    errors = []
+    for row in rows:
+        value = str(row.get("Release Date") or row.get("release_date") or "").strip()
+        if not parse_date(value):
+            errors.append(title_for(row) or "Unnamed report game")
+    for country in SEA6_COUNTRIES:
+        for row in included_country_games(sea_games, rows, country):
+            report_row = matching_report_row(row, rows)
+            _label, value = mobile_release_display(row, report_row, country)
+            if not parse_date(value):
+                errors.append(f"{country}: {row.get('game_title') or row.get('original_title') or 'Unnamed mobile game'}")
+    if errors:
+        raise ValueError("Release-date validation failed; report generation stopped: " + "; ".join(errors))
+
+
 def write_country_storefront_audit(sea_games, report_rows):
     """Record the exact country-card URLs used by a successful export."""
     meeting_date = next((str(row.get("meeting_date") or "").strip() for row in sea_games if row.get("meeting_date")), "unknown")
@@ -1258,10 +1275,31 @@ def mobile_release_display(row, report_row, country):
     if country_date and country_date.upper() not in invalid_values:
         return f"Mobile release in {SEA6_COUNTRY_NAMES[country]}", country_date
 
+    layer_date = str(row.get("mobile_release_date") or "").strip()
+    if layer_date and layer_date.upper() not in invalid_values:
+        return "First recorded mobile release", layer_date
+
     general_date = str(report_row.get("Release Date") or report_row.get("release_date") or "").strip()
     if general_date and general_date.upper() not in invalid_values:
         return "First recorded mobile release", general_date
     return "", ""
+
+
+def regional_mobile_release_display(row, report_row):
+    """Return the earliest supplied mobile release date without implying one country."""
+    candidates = [str(row.get("mobile_release_date") or "").strip()]
+    candidates.extend(str(row.get(f"{country.lower()}_mobile_release_date") or "").strip() for country in SEA6_COUNTRIES)
+    candidates.append(str(report_row.get("Release Date") or report_row.get("release_date") or "").strip())
+    valid_dates = []
+    for value in candidates:
+        if value and value.upper() not in {"N/A", "NA", "NONE", "NULL", "0"}:
+            parsed = parse_date(value)
+            if parsed:
+                valid_dates.append((parsed, value))
+    if not valid_dates:
+        return "", ""
+    _, value = min(valid_dates, key=lambda item: item[0])
+    return "Earliest recorded mobile release", value
 
 
 def steam_context_html(report_row, label="PC equivalent / Steam context"):
@@ -1286,11 +1324,14 @@ def sea_regional_mobile_card(row, report_rows):
     genre_html = f'<span class="genre-tag">{escape(genre)}</span>' if genre else ""
     continuity = str(report_row.get("Continuity Note") or "").strip()
     continuity_html = f'<div class="continuity-note"><b>Continuity</b><p>{escape(continuity)}</p></div>' if continuity else ""
+    release_label, release_date = regional_mobile_release_display(row, report_row)
+    release_html = f'<p class="country-release-date"><b>{escape(release_label)}</b> {escape(display_date(release_date) or release_date)}</p>' if release_date else ""
     return f'''<article class="sea-country-card">
   <div class="sea-country-card-heading"><h3>{game_title_html(title, link_row)}</h3><span class="metric-badge neutral">{escape(classification)}</span></div>
 {original_html}
   <div class="sea-company-stack"><p class="sea-company-meta"><b>Publisher</b><span>{escape(publisher)}</span></p></div>
   <div class="meta-chip-row">{genre_html}</div>
+  {release_html}
   <div class="sea-country-stats"><span><small>SEA6 ST Gross Revenue</small><b>{escape(money(row.get("sea_st_gross_revenue")))}</b></span><span><small>SEA6 ST Downloads</small><b>{escape(number(row.get("sea_st_downloads")))}</b></span></div>
   <p class="sea-game-summary">{escape(summary)}</p>
   {continuity_html}
@@ -2459,6 +2500,7 @@ def main(argv=None):
     sea_games = source_sea_game_layer(rows, schedule)
     require_country_storefront_urls(sea_games, rows)
     require_translated_country_titles(sea_games, rows)
+    require_release_dates(rows, sea_games)
     write_country_storefront_audit(sea_games, rows)
     metadata = normalized_metadata(metadata, rows)
     DOCS.mkdir(parents=True, exist_ok=True)

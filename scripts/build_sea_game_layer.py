@@ -27,6 +27,7 @@ OUTPUT_FIELDS = [
     "platforms",
     "mobile_storefront_url",
     "mobile_storefront_url_source",
+    "mobile_release_date",
     "sea_st_gross_revenue",
     "sea_st_downloads",
     "countries_detected",
@@ -44,6 +45,7 @@ for _country in SEA6_COUNTRIES:
             f"{_prefix}_downloads",
             f"{_prefix}_ios_rank",
             f"{_prefix}_android_rank",
+            f"{_prefix}_mobile_release_date",
         ]
     )
 OUTPUT_FIELDS.extend(
@@ -235,6 +237,7 @@ def build_rows(meeting_date, unified_exports, ranking_files):
             "platforms": ", ".join(sorted(platforms, key=("iOS", "Android").index)),
             "mobile_storefront_url": verified_storefront or ranking_storefront,
             "mobile_storefront_url_source": "verified_override" if verified_storefront else ("ranking_export" if ranking_storefront else ""),
+            "mobile_release_date": candidate.get("earliest_release_date", ""),
             "sea_st_gross_revenue": format_number(total_revenue),
             "sea_st_downloads": format_number(total_downloads),
             "countries_detected": ", ".join(countries_detected),
@@ -255,6 +258,7 @@ def build_rows(meeting_date, unified_exports, ranking_files):
             output[f"{prefix}_downloads"] = format_number(by_country[country]["downloads"])
             output[f"{prefix}_ios_rank"] = by_country[country]["ios_rank"]
             output[f"{prefix}_android_rank"] = by_country[country]["android_rank"]
+            output[f"{prefix}_mobile_release_date"] = candidate_by_country.get(country, {}).get("earliest_release_date", "")
         rows.append(output)
     return sorted(rows, key=lambda row: (-parse_number(row["sea_st_gross_revenue"]), row["game_title"]))
 

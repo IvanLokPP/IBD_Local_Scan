@@ -91,6 +91,10 @@ config/static_report_schedule.json
 
 After changing the schedule config or refreshing report outputs, rerun the static export and commit the updated `docs/` files.
 
+### Released-game release-date gate
+
+Every released-game card must show a verified release date. The SEA6 game layer carries the supplied Sensor Tower mobile release date, including country-level values where available. PC/console cards use their verified Steam or official-source release date. Static export stops when a visible released game has no usable date; do not replace a missing date with `N/A` or omit the field.
+
 ## Local Development Dashboard
 
 Run the local dashboard:

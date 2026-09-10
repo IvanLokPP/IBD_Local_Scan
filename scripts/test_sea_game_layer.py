@@ -87,6 +87,8 @@ def test_sea6_layer_combines_country_rows_and_accepts_lagged_ranking_date():
         assert shared["my_android_rank"] == "10"
         assert shared["mobile_storefront_url"] == "https://apps.example/sg/iphone"
         assert shared["mobile_storefront_url_source"] == "ranking_export"
+        assert shared["mobile_release_date"] == "2026/07/01"
+        assert shared["my_mobile_release_date"] == "2026/07/01"
         assert shared["ranking_data_as_of"] == "2026-08-03"
         assert shared["meeting_date"] == "2026-08-04"
 

@@ -72,9 +72,20 @@ def main():
     general_release_html = exporter.sea_country_card(country_row, "SG", [report_row])
     assert_true("First recorded mobile release" in general_release_html, "shared release date should be labeled as first recorded mobile release")
     assert_true("Mobile release in Singapore" not in general_release_html, "shared release date must not be labeled country-specific")
+    layer_release_html = exporter.sea_country_card({**country_row, "mobile_release_date": "2026-08-02"}, "SG", [])
+    assert_true("02 Aug 2026" in layer_release_html, "country cards should use the SEA6 layer release date when no report row exists")
     specific_release_html = exporter.sea_country_card({**country_row, "sg_mobile_release_date": "2026-08-03"}, "SG", [report_row])
     assert_true("Mobile release in Singapore" in specific_release_html, "country-specific release date should use the country label")
     assert_true("First recorded mobile release" not in specific_release_html, "country-specific date should not use the general label")
+    regional_release_html = exporter.sea_regional_mobile_card(
+        {**country_row, "mobile_release_date": "2026-08-01"}, [report_row]
+    )
+    assert_true("Earliest recorded mobile release" in regional_release_html and "01 Aug 2026" in regional_release_html, "regional mobile cards should show their release date")
+    try:
+        exporter.require_release_dates([], [{**country_row, "sg_downloads": "10", "sg_revenue_gross": "4001", "sg_revenue_prior_store": "0"}])
+        raise AssertionError("missing mobile release date should fail export")
+    except ValueError as error:
+        assert_true("Country Test" in str(error), "release-date failure should name the affected game")
     linked_country_html = exporter.sea_country_card(
         {**country_row, "mobile_storefront_url": "https://play.google.com/store/apps/details?id=country-test"},
         "SG",
